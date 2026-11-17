@@ -19,8 +19,23 @@ export function openCampaign(id: number | null) {
   window.location.hash = id === null ? "#/campaigns" : `#/campaigns/${id}`;
 }
 
+// index.html sets the initial theme; this only flips and remembers it.
+function useTheme() {
+  const [theme, setTheme] = useState(document.documentElement.dataset.theme ?? "light");
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try {
+      localStorage.setItem("theme", theme);
+    } catch {
+      // storage blocked: the choice just is not remembered
+    }
+  }, [theme]);
+  return [theme, () => setTheme(theme === "dark" ? "light" : "dark")] as const;
+}
+
 export function App() {
   const route = useHashRoute();
+  const [theme, toggleTheme] = useTheme();
   return (
     <>
       <header>
@@ -33,6 +48,9 @@ export function App() {
             Editor
           </a>
         </nav>
+        <button className="theme" onClick={toggleTheme}>
+          {theme === "dark" ? "☀ Light" : "☾ Dark"}
+        </button>
       </header>
       <main>
         {route.page === "new" ? <CreatePage /> : <EditorPage campaignId={route.campaignId} />}

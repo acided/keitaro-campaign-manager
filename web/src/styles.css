@@ -1,18 +1,56 @@
+/* Colors are tokens: light by default, dark under [data-theme="dark"] (set in index.html and App.tsx). */
 :root {
+  color-scheme: light;
   --bg: #f4f5f7;
   --card: #ffffff;
+  --field: #ffffff;
+  --hover: #f0f2f5;
   --border: #dcdfe4;
   --text: #1d2330;
   --muted: #6b7280;
   --accent: #2563eb;
+  --accent-strong: #2563eb; /* button background, white text on it */
+  --on-accent: #ffffff;
   --dirty: #fff7d1;
   --dirty-border: #e6c84f;
-  --removed: #8e939b;
+  --on-dirty-border: #3b2f00;
+  --removed: #646972;
+  --removed-bg: #eceef1;
   --error: #c62828;
+  --tag: #e8eaee;
+  --tag-good: #dcf3e2;
+  --on-tag-good: #1b6b34;
+  --tag-bad: #f6dcdc;
+  --shadow: rgb(0 0 0 / 0.1);
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 15px;
   color: var(--text);
   background: var(--bg);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121418;
+  --card: #1b1e24;
+  --field: #14161b;
+  --hover: #262a33;
+  --border: #323743;
+  --text: #e4e7ec;
+  --muted: #959cab;
+  --accent: #5b8def;
+  --accent-strong: #3366d6;
+  --on-accent: #ffffff;
+  --dirty: #352d10;
+  --dirty-border: #c9a227;
+  --on-dirty-border: #1d1800;
+  --removed: #858b98;
+  --removed-bg: #20232a;
+  --error: #ef6b6b;
+  --tag: #2a2e37;
+  --tag-good: #173320;
+  --on-tag-good: #6fd08c;
+  --tag-bad: #3b1e1e;
+  --shadow: rgb(0 0 0 / 0.5);
 }
 
 * {
@@ -21,6 +59,7 @@
 
 body {
   margin: 0;
+  background: var(--bg);
 }
 
 header {
@@ -30,6 +69,10 @@ header {
   padding: 12px 24px;
   background: var(--card);
   border-bottom: 1px solid var(--border);
+}
+
+header .theme {
+  margin-left: auto;
 }
 
 nav {
@@ -92,10 +135,11 @@ input,
 select,
 button {
   font: inherit;
+  color: var(--text);
   padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--field);
 }
 
 button {
@@ -108,9 +152,9 @@ button:disabled {
 }
 
 button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: var(--on-accent);
 }
 
 button.link {
@@ -161,10 +205,10 @@ button.link {
   margin: 2px 0 0;
   padding: 0;
   list-style: none;
-  background: #fff;
+  background: var(--field);
   border: 1px solid var(--border);
   border-radius: 6px;
-  box-shadow: 0 4px 12px rgb(0 0 0 / 0.1);
+  box-shadow: 0 4px 12px var(--shadow);
   font-weight: 400;
 }
 
@@ -174,7 +218,7 @@ button.link {
 }
 
 .picker li:hover {
-  background: var(--bg);
+  background: var(--hover);
 }
 
 table {
@@ -205,7 +249,7 @@ tfoot td {
 
 tr.removed td {
   color: var(--removed);
-  background: #eceef1;
+  background: var(--removed-bg);
 }
 
 input.share {
@@ -224,21 +268,22 @@ input.share {
 
 .badge {
   background: var(--dirty-border);
+  color: var(--on-dirty-border);
 }
 
 .change {
-  background: #e8eaee;
+  background: var(--tag);
   color: var(--muted);
 }
 
 .change.added,
 .change.restored {
-  background: #dcf3e2;
-  color: #1b6b34;
+  background: var(--tag-good);
+  color: var(--on-tag-good);
 }
 
 .change.removed {
-  background: #f6dcdc;
+  background: var(--tag-bad);
   color: var(--error);
 }
 
