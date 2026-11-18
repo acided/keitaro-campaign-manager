@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Offer shares as bars: 40 / 30 / 30 -->
+  <rect width="32" height="32" rx="7" fill="#2563eb"/>
+  <rect x="6" y="7" width="5.5" height="18" rx="1.5" fill="#fff"/>
+  <rect x="13.25" y="12" width="5.5" height="13" rx="1.5" fill="#fff" fill-opacity=".8"/>
+  <rect x="20.5" y="12" width="5.5" height="13" rx="1.5" fill="#fff" fill-opacity=".8"/>
+</svg>
