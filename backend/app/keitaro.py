@@ -10,6 +10,7 @@ import httpx
 
 USER_AGENT = "keitaro-campaign-manager/0.1"
 OFFERS_TTL = 120
+ERROR_TEXT_LIMIT = 300  # Keitaro error bodies are relayed to the UI, keep them short
 
 
 class KeitaroError(Exception):
@@ -53,10 +54,12 @@ class KeitaroClient:
         except httpx.HTTPError as exc:
             raise KeitaroError(f"Keitaro is unreachable ({type(exc).__name__})") from exc
         if response.is_error:
-            raise KeitaroError(
-                f"Keitaro {method} {path} failed ({response.status_code}): {_error_text(response)}"
-            )
-        return response.json()
+            text = _error_text(response)[:ERROR_TEXT_LIMIT]
+            raise KeitaroError(f"Keitaro {method} {path} failed ({response.status_code}): {text}")
+        try:
+            return response.json()
+        except ValueError as exc:  # e.g. a Cloudflare page with status 200
+            raise KeitaroError(f"Keitaro {method} {path} returned a non-JSON response") from exc
 
     # ---------------------------------------------------------------- reference data
 

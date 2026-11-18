@@ -188,3 +188,51 @@ async def test_push_blocked_when_pins_do_not_sum_to_100(client, keitaro):
     response = await client.post(f"/api/streams/{OFFER_STREAM}/push")
     assert response.status_code == 422
     assert keitaro.pushes == []
+
+
+# ---------------------------------------------------------------- security
+
+
+async def test_ids_beyond_postgres_integer_are_422_not_500(client):
+    for request in (
+        client.get("/api/campaigns/99999999999"),
+        client.post("/api/streams/99999999999/push"),
+        client.delete(f"{OFFERS}/0"),
+        client.post(OFFERS, json={"offer_id": 2**31}),
+    ):
+        assert (await request).status_code == 422
+
+
+async def test_unknown_host_and_cross_site_writes_are_refused(client, keitaro):
+    await fetch(client)
+    await client.post(OFFERS, json={"offer_id": 14})
+    push = f"/api/streams/{OFFER_STREAM}/push"
+
+    assert (await client.get("/api/campaigns", headers={"Host": "rebound.example"})).status_code == 400
+    assert (await client.post(push, headers={"Origin": "https://evil.example"})).status_code == 403
+    assert keitaro.pushes == []
+    assert (await client.post(push, headers={"Origin": "http://localhost:8080"})).status_code == 200
+
+
+async def test_push_refuses_campaign_renamed_in_keitaro(client, keitaro):
+    await fetch(client)
+    await client.post(OFFERS, json={"offer_id": 14})
+    keitaro.campaigns_[OURS]["name"] = "someone_elses_now"
+
+    response = await client.post(f"/api/streams/{OFFER_STREAM}/push")
+    assert response.status_code == 403
+    assert keitaro.pushes == []
+
+
+async def test_push_refuses_stream_edited_in_keitaro_since_fetch(client, keitaro):
+    await fetch(client)
+    await client.post(OFFERS, json={"offer_id": 14})
+    keitaro.streams[OURS][1]["offers"].append(keitaro_offer(15, 0))  # a colleague added an offer
+
+    response = await client.post(f"/api/streams/{OFFER_STREAM}/push")
+    assert response.status_code == 409
+    assert "Fetch first" in response.json()["detail"]
+    assert keitaro.pushes == []
+
+    stream = offer_stream(await fetch(client))  # Fetch keeps the draft and picks up offer 15
+    assert stream["dirty"] and 15 in [o["offer_id"] for o in stream["offers"]]

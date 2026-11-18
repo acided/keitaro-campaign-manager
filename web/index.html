@@ -4,15 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Keitaro campaign manager</title>
-    <script>
-      // Set the theme before the first paint: saved choice, else the system preference.
-      let theme = null;
-      try { theme = localStorage.getItem("theme"); } catch {}
-      if (theme !== "light" && theme !== "dark") {
-        theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-      }
-      document.documentElement.dataset.theme = theme;
-    </script>
+    <!-- Blocking on purpose: sets the theme before the first paint. A file, not inline, for the CSP. -->
+    <script src="/theme.js"></script>
   </head>
   <body>
     <div id="root"></div>

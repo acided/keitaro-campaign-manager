@@ -55,3 +55,15 @@ async def test_network_failure_is_keitaro_error_without_leaking_details(client):
     with pytest.raises(KeitaroError, match=r"unreachable \(ConnectTimeout\)") as exc:
         await client.offers()
     assert "secret-key" not in str(exc.value)
+
+
+@respx.mock
+async def test_non_json_success_and_long_errors_are_handled(client):
+    respx.get(f"{BASE}/campaigns/7").respond(200, text="<html>Cloudflare</html>")
+    with pytest.raises(KeitaroError, match="non-JSON"):
+        await client.campaign(7)
+
+    respx.get(f"{BASE}/campaigns/8").respond(400, json={"error": "x" * 5000})
+    with pytest.raises(KeitaroError) as exc:
+        await client.campaign(8)
+    assert len(exc.value.message) < 400

@@ -39,6 +39,8 @@ def parse_geo(raw: str) -> list[str]:
 def campaign_name(raw: str) -> str:
     """Our campaigns must start with the prefix; it is added when missing."""
     name = raw.strip()
+    if any(not c.isprintable() for c in name):
+        raise InvalidError("Name contains control characters")
     if not name.startswith(settings.campaign_prefix):
         name = settings.campaign_prefix + name
     if name == settings.campaign_prefix:
@@ -97,11 +99,14 @@ async def create_in_keitaro(
         for payload in streams:
             await keitaro.create_stream(payload)
     except KeitaroError as exc:
-        try:
-            await keitaro.delete_campaign(campaign_id)
-        except KeitaroError:
-            raise KeitaroError(
-                f"{exc.message}. Rollback failed too: delete campaign {campaign_id} by hand"
-            ) from exc
-        raise KeitaroError(f"{exc.message}. The half-created campaign was deleted") from exc
+        raise await rollback(keitaro, campaign_id, exc.message) from exc
     return campaign_id
+
+
+async def rollback(keitaro: KeitaroClient, campaign_id: int, reason: str) -> KeitaroError:
+    """Delete our campaign after a failed creation step; returns the error to raise."""
+    try:
+        await keitaro.delete_campaign(campaign_id)
+    except KeitaroError:
+        return KeitaroError(f"{reason}. Rollback failed too: delete campaign {campaign_id} by hand")
+    return KeitaroError(f"{reason}. The half-created campaign was deleted")

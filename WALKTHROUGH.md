@@ -91,7 +91,11 @@ The end-to-end example is a test, through the pure functions and through HTTP:
 | Add an offer that was removed | 409 "use Bring back", so the pin and history are kept |
 | Remove an offer that was never published | Row is deleted, not greyed out |
 | Push fails in Keitaro | Nothing changes locally, stream stays yellow, error shown |
-| Push accepted by Keitaro, local commit fails | Next Fetch reconciles (Keitaro is the source of truth) |
+| Push accepted by Keitaro, local commit fails | Stream stays yellow, Push can be repeated (same payload); Fetch reconciles |
+| Stream edited in Keitaro since the last Fetch | Push refused with 409 "Fetch first", so a colleague's edit is not overwritten |
+| Campaign renamed in Keitaro and no longer has the prefix | Push re-reads the name and refuses with 403 |
+| Two actions on one stream at the same time | The stream row is locked (`SELECT ... FOR UPDATE`), they run one after another |
+| Creating a campaign fails after Keitaro created it | The campaign is deleted from Keitaro (streams or local save failed) |
 | Stream deleted in Keitaro | Deleted locally on the next Fetch |
 | Stream without offers (redirect) | Shown as a plain stream without an editor |
 | Campaign of someone else | 403 before its streams are read |
@@ -105,8 +109,10 @@ The end-to-end example is a test, through the pure functions and through HTTP:
    `disabled` instead?
 3. **Pinned offer edited directly in Keitaro.** If someone changes a pinned offer from 25 to 30 in Keitaro,
    Fetch shows 30 and keeps the pin at 25; the next action returns it to 25. Should Fetch drop such a pin?
-4. **Concurrent changes.** Push overwrites whatever is in Keitaro at that moment. A check that the stream has not
-   changed since the last Fetch (comparing `updated_at`) would prevent overwriting a colleague's edit. Worth it?
+4. **Concurrent changes.** Before writing, Push re-reads the stream and refuses with 409 if its offers differ
+   from what we last fetched or pushed. There is still a window of a few hundred milliseconds between that read
+   and the `PUT`, because Keitaro has no conditional update. Is that good enough, or does the team edit streams
+   so often that it needs a lock on the Keitaro side?
 5. **Stream 2 type.** It is a `regular` stream without filters at position 2, which catches everyone stream 1 did
    not. Keitaro also has a `default` stream type for "everyone else". Is there a team convention?
 6. **Users and access.** There is no authentication: the app assumes a trusted internal network. Who would use it?
@@ -114,14 +120,35 @@ The end-to-end example is a test, through the pure functions and through HTTP:
 ## 8. What is not done
 
 - No authentication or audit log of who pushed what.
-- No optimistic-concurrency check before Push (question 4).
-- Frontend has no automated tests; the backend has 75 tests, and the whole scenario was run once against the
+- If `POST /campaigns` times out but Keitaro created the campaign anyway, its id is unknown and it is not rolled
+  back; it stays as a `test_kochkurov_*` campaign to delete by hand.
+- Frontend has no automated tests; the backend has 87 tests, and the whole scenario was run once against the
   live Keitaro (23 checks, each verified by reading Keitaro back directly).
 - `GET /campaigns` loads all campaigns and filters by prefix: fine for hundreds, not for very large instances.
 - The offer catalog is cached in process memory for 2 minutes, which is fine for one API instance only.
 - No CI pipeline.
 
-## 9. Likely questions
+## 9. Security review
+
+After the first version I ran a security review of the whole app (injection, access control, frontend,
+infrastructure). No SQL injection (ORM with bound parameters only), no injection into Keitaro requests (URLs are
+built from typed ints, the geo is checked against the ISO list), no XSS (React escapes Keitaro names), no secret
+in the git history. Fixed after the review:
+
+| Problem | Fix |
+|---|---|
+| No login, so any website open in the browser could `POST /push` (a body-less POST needs no CORS preflight); DNS rebinding could reach every endpoint | Middleware: requests only for allowed `Host` names, writes only from our own `Origin` |
+| Postgres (`kcm`/`kcm`) and the app were published on all interfaces, reachable from the LAN | Compose binds both to `127.0.0.1` |
+| The prefix was checked on Fetch only; a campaign renamed in Keitaro afterwards could still be pushed to | Push re-reads the campaign name from Keitaro right before writing |
+| Push replaced offers added in Keitaro after the last Fetch | Push compares Keitaro's offers with our published layer, 409 on mismatch |
+| Ids above the Postgres integer range gave a 500 | Path and body ids are bounded `1..2^31-1`, 422 |
+| A 300-char name: Keitaro created the campaign, the local save failed, the campaign stayed | Name limited to 200 chars, no control characters; any failure after creation deletes the campaign |
+| Domain, group and traffic source ids were sent to Keitaro unchecked | Checked against the same lists the form shows |
+| Concurrent actions on one stream could lose an update or return a 500 | Row lock per stream; a unique-key race answers 409 |
+| No security headers, the page could be framed (clickjacking) | nginx: CSP, `X-Frame-Options`, `nosniff`, `Referrer-Policy`, no version; theme script moved to a file for the CSP |
+| API container ran as root; a non-JSON 200 from Keitaro gave a 500; Keitaro error text relayed in full | Non-root user; `KeitaroError` (502); error text cut to 300 chars |
+
+## 10. Likely questions
 
 **Why keep business logic out of the endpoints?**
 `editor.py` is pure functions over a list of rows, so every rule is tested in milliseconds without a database

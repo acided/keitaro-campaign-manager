@@ -4,6 +4,7 @@ import pytest
 
 from app.creator import ISO_COUNTRIES, campaign_name, make_alias, parse_geo
 from app.errors import InvalidError
+from app.keitaro import KeitaroError
 
 
 def form(**overrides) -> dict:
@@ -126,9 +127,32 @@ async def test_failed_rollback_tells_what_to_clean_up(client, keitaro):
 
 
 @pytest.mark.parametrize(
-    "overrides", [{"geo": "MX,ZZ"}, {"name": " "}, {"offer_id": 99}], ids=["geo", "name", "offer"]
+    "overrides",
+    [
+        {"geo": "MX,ZZ"},
+        {"name": " "},
+        {"name": "x" * 201},
+        {"name": "demo" + chr(0)},
+        {"offer_id": 99},
+        {"domain_id": 1},
+        {"group_id": 2},
+        {"traffic_source_id": 3},
+        {"extra": 1},
+    ],
+    ids=["geo", "name", "long-name", "control-char", "offer", "domain", "group", "source", "extra-field"],
 )
 async def test_invalid_form_is_422_before_anything_is_created(client, keitaro, overrides):
     response = await client.post("/api/campaigns", json=form(**overrides))
     assert response.status_code == 422
     assert keitaro.created == []
+
+
+async def test_campaign_that_fails_to_save_locally_is_deleted_from_keitaro(client, keitaro):
+    async def broken_read(campaign_id):
+        raise KeitaroError(f"Keitaro GET /campaigns/{campaign_id} failed (500): boom")
+
+    keitaro.campaign = broken_read
+    response = await client.post("/api/campaigns", json=form())
+    assert response.status_code == 502
+    assert "half-created campaign was deleted" in response.json()["detail"]
+    assert keitaro.deleted == [300]

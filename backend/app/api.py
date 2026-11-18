@@ -5,7 +5,7 @@ import asyncio
 from collections.abc import Callable
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Path, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -17,6 +17,7 @@ from app.errors import ConflictError, ForbiddenError, InvalidError, NotFoundErro
 from app.keitaro import KeitaroClient
 from app.models import Campaign, Stream, StreamOffer
 from app.schemas import (
+    INT32_MAX,
     AddOfferIn,
     CampaignView,
     CreateCampaignIn,
@@ -39,6 +40,7 @@ def get_keitaro(request: Request) -> KeitaroClient:
 
 Session = Annotated[AsyncSession, Depends(get_session)]
 Keitaro = Annotated[KeitaroClient, Depends(get_keitaro)]
+Id = Annotated[int, Path(ge=1, le=INT32_MAX)]
 
 
 # ---------------------------------------------------------------- views
@@ -103,8 +105,12 @@ async def load_campaign(session: AsyncSession, campaign_id: int) -> Campaign | N
 
 
 async def load_stream(session: AsyncSession, stream_id: int) -> Stream:
+    """Row-locked until commit: concurrent actions on one stream run one after another."""
     stream = await session.scalar(
-        select(Stream).where(Stream.id == stream_id).options(selectinload(Stream.offers))
+        select(Stream)
+        .where(Stream.id == stream_id)
+        .options(selectinload(Stream.offers))
+        .with_for_update()
     )
     if stream is None:
         raise NotFoundError(f"Stream {stream_id} not found, fetch its campaign first")
@@ -154,16 +160,21 @@ def to_items(raw: list[dict]) -> list[Item]:
     return [Item(id=r["id"], name=r["name"]) for r in raw]
 
 
+def ensure_listed(items: list[dict], item_id: int, what: str) -> None:
+    if not any(i["id"] == item_id for i in items):
+        raise InvalidError(f"{what} {item_id} is not available in Keitaro")
+
+
 def default_id(items: list[Item], name: str) -> int | None:
     return next((i.id for i in items if i.name == name), items[0].id if items else None)
 
 
 @router.get("/offers")
-async def search_offers(keitaro: Keitaro, q: str = "") -> list[Item]:
+async def search_offers(keitaro: Keitaro, q: Annotated[str, Query(max_length=200)] = "") -> list[Item]:
     """Autocomplete. Offer names start with their id ("25327 Flexacil"), so one
     substring match covers search by id and by name."""
     needle = q.strip().lower()
-    found = [o for o in await active_offers(keitaro) if needle in o["name"].lower()]
+    found = [o for o in await active_offers(keitaro) if needle in (o.get("name") or "").lower()]
     return to_items(found[:AUTOCOMPLETE_LIMIT])
 
 
@@ -196,18 +207,29 @@ async def create_campaign(body: CreateCampaignIn, session: Session, keitaro: Kei
     name = creator.campaign_name(body.name)
     geo = creator.parse_geo(body.geo)
     await find_active_offer(keitaro, body.offer_id)
+    domains, groups, sources = await asyncio.gather(
+        keitaro.domains(), keitaro.campaign_groups(), keitaro.traffic_sources()
+    )
+    ensure_listed(domains, body.domain_id, "Domain")
+    ensure_listed(groups, body.group_id, "Group")
+    ensure_listed(sources, body.traffic_source_id, "Traffic source")
 
     campaign_id = await creator.create_in_keitaro(
         keitaro, name, geo, body.offer_id, body.domain_id, body.group_id, body.traffic_source_id
     )
-    return await sync_campaign(session, keitaro, campaign_id)
+    try:
+        return await sync_campaign(session, keitaro, campaign_id)
+    except Exception as exc:  # the campaign exists in Keitaro but not here: do not leave it there
+        await session.rollback()
+        reason = getattr(exc, "message", "Saving the new campaign failed")
+        raise await creator.rollback(keitaro, campaign_id, reason) from exc
 
 
 # ---------------------------------------------------------------- campaign
 
 
 @router.get("/campaigns/{campaign_id}")
-async def get_campaign(campaign_id: int, session: Session) -> CampaignView:
+async def get_campaign(campaign_id: Id, session: Session) -> CampaignView:
     campaign = await load_campaign(session, campaign_id)
     if campaign is None:
         raise NotFoundError(f"Campaign {campaign_id} not fetched yet")
@@ -215,7 +237,7 @@ async def get_campaign(campaign_id: int, session: Session) -> CampaignView:
 
 
 @router.post("/campaigns/{campaign_id}/fetch")
-async def fetch_campaign(campaign_id: int, session: Session, keitaro: Keitaro) -> CampaignView:
+async def fetch_campaign(campaign_id: Id, session: Session, keitaro: Keitaro) -> CampaignView:
     return await sync_campaign(session, keitaro, campaign_id)
 
 
@@ -223,7 +245,7 @@ async def fetch_campaign(campaign_id: int, session: Session, keitaro: Keitaro) -
 
 
 @router.post("/streams/{stream_id}/offers")
-async def add_offer(stream_id: int, body: AddOfferIn, session: Session, keitaro: Keitaro) -> StreamView:
+async def add_offer(stream_id: Id, body: AddOfferIn, session: Session, keitaro: Keitaro) -> StreamView:
     stream = await load_stream(session, stream_id)
     if stream.schema != OFFERS_SCHEMA:
         raise ConflictError("This stream redirects without offers")
@@ -234,38 +256,46 @@ async def add_offer(stream_id: int, body: AddOfferIn, session: Session, keitaro:
 
 
 @router.delete("/streams/{stream_id}/offers/{offer_id}")
-async def remove_offer(stream_id: int, offer_id: int, session: Session) -> StreamView:
+async def remove_offer(stream_id: Id, offer_id: Id, session: Session) -> StreamView:
     return await edit_stream(session, stream_id, lambda rows: editor.remove_offer(rows, offer_id))
 
 
 @router.post("/streams/{stream_id}/offers/{offer_id}/restore")
-async def restore_offer(stream_id: int, offer_id: int, session: Session) -> StreamView:
+async def restore_offer(stream_id: Id, offer_id: Id, session: Session) -> StreamView:
     return await edit_stream(session, stream_id, lambda rows: editor.restore_offer(rows, offer_id))
 
 
 @router.put("/streams/{stream_id}/offers/{offer_id}/pin")
-async def pin_offer(stream_id: int, offer_id: int, body: PinIn, session: Session) -> StreamView:
+async def pin_offer(stream_id: Id, offer_id: Id, body: PinIn, session: Session) -> StreamView:
     return await edit_stream(
         session, stream_id, lambda rows: editor.pin_offer(rows, offer_id, body.share)
     )
 
 
 @router.delete("/streams/{stream_id}/offers/{offer_id}/pin")
-async def unpin_offer(stream_id: int, offer_id: int, session: Session) -> StreamView:
+async def unpin_offer(stream_id: Id, offer_id: Id, session: Session) -> StreamView:
     return await edit_stream(session, stream_id, lambda rows: editor.unpin_offer(rows, offer_id))
 
 
 @router.post("/streams/{stream_id}/cancel")
-async def cancel(stream_id: int, session: Session) -> StreamView:
+async def cancel(stream_id: Id, session: Session) -> StreamView:
     return await edit_stream(session, stream_id, editor.cancel)
 
 
 @router.post("/streams/{stream_id}/push")
-async def push(stream_id: int, session: Session, keitaro: Keitaro) -> StreamView:
+async def push(stream_id: Id, session: Session, keitaro: Keitaro) -> StreamView:
     """Publish the draft. If Keitaro fails, nothing changes here and the stream stays yellow.
     If our commit failed after Keitaro accepted, the next Fetch would reconcile."""
     stream = await load_stream(session, stream_id)
     payload = editor.push_payload(stream.offers)
+    # Re-check in Keitaro right before writing: the campaign may have been renamed
+    # (no longer ours) or the stream edited there since our last Fetch.
+    ensure_ours((await keitaro.campaign(stream.campaign_id))["name"])
+    remote = next(
+        (s for s in await keitaro.campaign_streams(stream.campaign_id) if s["id"] == stream.id), None
+    )
+    if remote is None or not editor.published_matches(stream.offers, remote.get("offers") or []):
+        raise ConflictError("The stream was changed in Keitaro since the last Fetch. Fetch first")
     await keitaro.set_stream_offers(stream.id, payload)
     editor.mark_published(stream.offers)
     await session.commit()

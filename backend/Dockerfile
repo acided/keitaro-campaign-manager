@@ -7,6 +7,8 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 COPY . .
+RUN useradd --system --no-create-home app
+USER app
 
 EXPOSE 8000
 # Migrations run on every start; alembic skips the ones already applied.

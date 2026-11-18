@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: kcm
       POSTGRES_DB: kcm
     ports:
-      - "5432:5432" # for local runs and tests outside Docker
+      - "127.0.0.1:5432:5432" # for local runs and tests outside Docker; loopback only
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -26,7 +26,7 @@ services:
   web:
     build: ./web
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:80" # no login in the app: keep it off the LAN
     depends_on:
       - api
 

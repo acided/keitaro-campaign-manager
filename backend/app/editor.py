@@ -194,6 +194,14 @@ def push_payload(rows: Rows) -> list[dict]:
     ]
 
 
+def published_matches(rows: Rows, remote: list[dict]) -> bool:
+    """Does Keitaro still have what we last fetched or pushed? Push replaces the whole
+    offer list, so pushing over a stream edited in Keitaro would silently undo that edit."""
+    live = {o["offer_id"]: o["share"] for o in remote if o["state"] == ACTIVE}
+    ours = {r.offer_id: r.pub_share for r in rows if r.pub_state == ACTIVE}
+    return live == ours
+
+
 def mark_published(rows: Rows) -> None:
     """Call only after Keitaro accepted the push."""
     for row in rows:

@@ -19,7 +19,7 @@ from app.main import app
 from app.models import Base
 
 TEST_DATABASE_URL = os.environ.get(
-    "TEST_DATABASE_URL", "postgresql+asyncpg://kcm:kcm@localhost:5432/kcm_test"
+    "TEST_DATABASE_URL", "postgresql+asyncpg://kcm:kcm@127.0.0.1:5432/kcm_test"
 )
 
 OURS, FOREIGN = 100, 200
@@ -161,7 +161,7 @@ async def client(database_url, keitaro):
 
     app.dependency_overrides[get_session] = test_session
     app.dependency_overrides[get_keitaro] = lambda: keitaro
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as c:
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://localhost") as c:
         yield c
     app.dependency_overrides.clear()
     await engine.dispose()

@@ -39,7 +39,7 @@ npm install
 npm run dev                        # http://localhost:5173, proxies /api to :8000
 ```
 
-Default `DATABASE_URL` is `postgresql+asyncpg://kcm:kcm@localhost:5432/kcm` (the compose `db` service).
+Default `DATABASE_URL` is `postgresql+asyncpg://kcm:kcm@127.0.0.1:5432/kcm` (the compose `db` service).
 
 ## Migrations
 
@@ -77,6 +77,7 @@ All settings come from environment variables or the repo-root `.env` (see `.env.
 | `CAMPAIGN_PREFIX` | `test_kochkurov_` | Only campaigns with this prefix can be created, opened and edited |
 | `DEFAULT_GROUP`, `DEFAULT_TRAFFIC_SOURCE` | `FORTESTS` | Preselected in the creator form |
 | `DATABASE_URL` | local compose Postgres | SQLAlchemy async URL |
+| `ALLOWED_HOSTS` | `["localhost","127.0.0.1"]` | Host names the API answers to; writes are accepted only from these origins |
 
 ## How it works
 
@@ -97,7 +98,14 @@ Code map: `app/editor.py` (all business rules, no I/O) · `app/creator.py` · `a
 
 The Keitaro instance is shared production, so the app only ever writes to campaigns named
 `CAMPAIGN_PREFIX*`: other campaigns are hidden, and fetching one is refused before its streams are read.
-If creating a stream fails, the half-created campaign is deleted. Nothing calls Keitaro's archive cleanup.
+Push re-reads the campaign from Keitaro right before writing: a campaign renamed without the prefix is refused,
+and a stream edited in Keitaro since the last Fetch is refused with 409 instead of being overwritten.
+If creating the campaign fails after Keitaro created it, the half-created campaign is deleted.
+Nothing calls Keitaro's archive cleanup.
+
+There is no login, so the app is meant for one machine: compose publishes it and Postgres on `127.0.0.1` only,
+the API answers only to `ALLOWED_HOSTS` and accepts writes only from its own pages (no CSRF, no DNS rebinding),
+and nginx sends a strict CSP and anti-framing headers. Details: WALKTHROUGH, section 9.
 
 ## API
 
